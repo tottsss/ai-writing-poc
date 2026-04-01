@@ -1,0 +1,22 @@
+{
+  "name": "ai-writing-poc",
+  "version": "1.0.0",
+  "description": "Academic Collaborative AI Writing Platform PoC",
+  "main": "apps/api/src/server.js",
+  "scripts": {
+    "start": "node apps/api/src/server.js",
+    "test": "node --test apps/api/test/**/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage apps/api/test/**/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.1"
+  }
+}
