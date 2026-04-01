@@ -47,6 +47,44 @@ app.get("/documents/:id", (req, res) => {
   return res.json(document);
 });
 
+app.put("/documents/:id", (req, res) => {
+  const existingDocument = db.documents[req.params.id];
+
+  if (!existingDocument) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+
+  const updatedDocument = {
+    ...existingDocument,
+    current_content: getStringValue(req.body?.content, ""),
+    updated_at: new Date().toISOString()
+  };
+
+  db.documents[req.params.id] = updatedDocument;
+  return res.json(updatedDocument);
+});
+
+app.post("/documents/:id/ai/summarize", (req, res) => {
+  const existingDocument = db.documents[req.params.id];
+
+  if (!existingDocument) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+
+  const selectedText = getStringValue(req.body?.selected_text, "").trim();
+
+  if (!selectedText) {
+    return res.status(400).json({ error: "No text provided" });
+  }
+
+  return setTimeout(() => {
+    res.json({
+      original_text: selectedText,
+      ai_response: `[AI Summary]: ${selectedText.substring(0, 30)}... is a complex topic that requires further academic synthesis.`
+    });
+  }, 1500);
+});
+
 if (require.main === module) {
   const port = 3000;
 
