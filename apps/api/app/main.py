@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import init_db
-from app.routes import auth, documents, permissions, versions
+from app.routes import ai, auth, collaboration, documents, permissions, versions
 
 
 @asynccontextmanager
@@ -17,11 +17,11 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="AI Writing PoC API",
+        title="AI Writing Platform API",
         description=(
             "Backend for the collaborative document editor. Implements auth, "
-            "documents, versioning, and role-based permissions. AI streaming "
-            "and WebSocket collaboration are owned by other team members."
+            "documents, versioning, role-based permissions, real-time WebSocket "
+            "collaboration with OCC conflict resolution, and AI streaming."
         ),
         version="0.1.0",
         lifespan=lifespan,
@@ -39,6 +39,8 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(versions.router)
     app.include_router(permissions.router)
+    app.include_router(collaboration.router)
+    app.include_router(ai.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:

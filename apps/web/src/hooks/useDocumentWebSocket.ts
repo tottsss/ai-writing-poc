@@ -20,6 +20,7 @@ export interface UseDocumentWebSocketResult {
   isConnected: boolean;
   lastError: string | null;
   reconnect: () => void;
+  sendMessage: (data: Record<string, unknown>) => void;
 }
 
 type DocumentUpdatePayload = {
@@ -131,7 +132,8 @@ function parseMessageType(data: unknown): string | null {
 }
 
 export function useDocumentWebSocket(
-  documentId: string
+  documentId: string,
+  token?: string | null
 ): UseDocumentWebSocketResult {
   const [content, setContent] = useState<string | null>(null);
   const [version, setVersion] = useState<number | null>(null);
@@ -144,6 +146,13 @@ export function useDocumentWebSocket(
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const shouldReconnectRef = useRef(true);
+
+  const sendMessage = useCallback((data: Record<string, unknown>) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(data));
+    }
+  }, []);
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeoutRef.current !== null) {
@@ -186,8 +195,9 @@ export function useDocumentWebSocket(
       prev === "reconnecting" ? "reconnecting" : "connecting"
     );
 
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
     const socket = new WebSocket(
-      `ws://localhost:8000/ws/documents/${encodeURIComponent(documentId)}`
+      `ws://localhost:8000/ws/documents/${encodeURIComponent(documentId)}${tokenParam}`
     );
     socketRef.current = socket;
 
@@ -245,7 +255,7 @@ export function useDocumentWebSocket(
         connect();
       }, delayMs);
     };
-  }, [clearReconnectTimeout, closeSocket, documentId]);
+  }, [clearReconnectTimeout, closeSocket, documentId, token]);
 
   const reconnect = useCallback(() => {
     if (!documentId) {
@@ -278,7 +288,7 @@ export function useDocumentWebSocket(
       closeSocket();
       setConnectionState("closed");
     };
-  }, [clearReconnectTimeout, closeSocket, connect, documentId]);
+  }, [clearReconnectTimeout, closeSocket, connect, documentId, token]);
 
   return useMemo(
     () => ({
@@ -289,7 +299,8 @@ export function useDocumentWebSocket(
       isConnected: connectionState === "open",
       lastError,
       reconnect,
+      sendMessage,
     }),
-    [connectionState, content, lastError, presence, reconnect, version]
+    [connectionState, content, lastError, presence, reconnect, sendMessage, version]
   );
 }

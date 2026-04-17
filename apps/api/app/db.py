@@ -27,6 +27,6 @@ def get_db() -> Iterator[Session]:
 
 def init_db() -> None:
     # Import models so they register on Base.metadata before create_all.
-    from app.models import document, permission, user, version  # noqa: F401
+    from app.models import ai_interaction, document, permission, user, version  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
