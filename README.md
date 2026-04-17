@@ -1,22 +1,39 @@
-# Academic Collaborative AI Writing Platform - PoC
+# Academic Collaborative AI Writing Platform — Assignment 2
 
-This Proof of Concept demonstrates the foundational API contracts and frontend-to-backend communication outlined in our system architecture.
+Working implementation of the system designed in Assignment 1. The repo is a
+monorepo with two apps:
 
-## What It Demonstrates
+- `apps/api/` — FastAPI + SQLite backend (auth, documents, versioning, role-based
+  permissions).
+- `apps/web/` — React + TypeScript frontend.
 
-- Proper repository structure with `apps/api` and `apps/web`.
-- Core document CRUD operations over REST.
-- The AI feature workflow: sending only highlighted text from the editor to the API, receiving a mocked LLM response, previewing it, and allowing the user to accept or reject the result.
+LLM streaming and WebSocket / OT collaboration are owned by other team members
+and live in their own modules once added.
 
-## What Is Intentionally Not Implemented
+## Run everything
 
-- Real-time WebSocket synchronization, as this PoC focuses strictly on data contracts and basic communication.
-- Persistent database storage, using an in-memory database to minimize setup friction for reviewers.
-- Full authentication middleware.
+Requires `uv` (Python) and `npm` (Node) on PATH.
 
-## How to Run
+```bash
+./run.sh
+```
 
-1. Open a terminal in the project root.
-2. Run `npm install` to install dependencies (`express`, `cors`).
-3. Start the backend with `node apps/api/src/server.js`.
-4. Open `apps/web/src/index.html` directly in a web browser.
+Backend boots on <http://localhost:8000> (`/docs` for the OpenAPI UI). Frontend
+boots on <http://localhost:5173>.
+
+## Run pieces individually
+
+Backend only — see [apps/api/README.md](apps/api/README.md).
+
+Frontend only:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+## Deviations from Assignment 1
+
+See [DEVIATIONS.md](DEVIATIONS.md). Notably: switching from last-write-wins to
+Operational Transformation for live concurrent editing.
