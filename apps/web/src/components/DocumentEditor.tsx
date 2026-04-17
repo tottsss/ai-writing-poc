@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import AITextAssistant from "./AITextAssistant";
 import { useAuth } from "../hooks/useAuth";
 
 export interface DocumentEditorProps {
   documentId: string;
   initialContent: string;
   version: number;
+  readOnly?: boolean;
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -107,7 +107,7 @@ function parseLatestSnapshot(data: unknown): LatestSnapshot | null {
   );
 }
 
-function DocumentEditor({ documentId, initialContent, version }: DocumentEditorProps) {
+function DocumentEditor({ documentId, initialContent, version, readOnly = false }: DocumentEditorProps) {
   const { accessToken, logout } = useAuth();
   const [content, setContent] = useState(initialContent);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -126,13 +126,24 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
   const editor = useEditor({
     extensions: [StarterKit],
     content: initialContent,
+    editable: !readOnly,
     onUpdate: ({ editor: tiptapEditor }) => {
+      if (readOnly) {
+        return;
+      }
       const nextContent = tiptapEditor.getHTML();
       setContent(nextContent);
       setSaveStatus("idle");
       setSaveError(null);
     },
   });
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
 
   useEffect(() => {
     versionRef.current = version;
@@ -165,24 +176,6 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
 
       if (editor && editor.getHTML() !== snapshot.content) {
         editor.commands.setContent(snapshot.content, false);
-      }
-    },
-    [editor]
-  );
-
-  const handleVersionSaved = useCallback(
-    (savedContent: string, savedVersion: number) => {
-      versionRef.current = savedVersion;
-      setCurrentVersion(savedVersion);
-      lastSavedContentRef.current = savedContent;
-      setContent(savedContent);
-      setSaveStatus("saved");
-      setSaveError(null);
-      setIsConflictModalOpen(false);
-      setConflictSnapshot(null);
-
-      if (editor && editor.getHTML() !== savedContent) {
-        editor.commands.setContent(savedContent, false);
       }
     },
     [editor]
@@ -315,7 +308,7 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
   }, [accessToken, applyLatestSnapshot, conflictSnapshot, documentId, logout]);
 
   useEffect(() => {
-    if (!editor) {
+    if (!editor || readOnly) {
       return;
     }
 
@@ -338,7 +331,7 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
         window.clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [content, editor, saveDocument]);
+  }, [content, editor, readOnly, saveDocument]);
 
   useEffect(() => {
     return () => {
@@ -354,12 +347,21 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
 
   return (
     <div className="editor-form">
+      {readOnly ? (
+        <div
+          className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700"
+          style={{ display: "inline-block", marginBottom: "0.5rem" }}
+        >
+          Read-only • viewer access
+        </div>
+      ) : null}
+
       <div className="editor-toolbar" role="toolbar" aria-label="Editor toolbar">
         <button
           type="button"
           className={editor.isActive("bold") ? "active" : ""}
           onClick={() => editor.chain().focus().toggleBold().run()}
-          disabled={!editor.can().chain().focus().toggleBold().run()}
+          disabled={readOnly || !editor.can().chain().focus().toggleBold().run()}
         >
           Bold
         </button>
@@ -367,7 +369,7 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
           type="button"
           className={editor.isActive("italic") ? "active" : ""}
           onClick={() => editor.chain().focus().toggleItalic().run()}
-          disabled={!editor.can().chain().focus().toggleItalic().run()}
+          disabled={readOnly || !editor.can().chain().focus().toggleItalic().run()}
         >
           Italic
         </button>
@@ -375,6 +377,7 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
           type="button"
           className={editor.isActive("heading", { level: 2 }) ? "active" : ""}
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          disabled={readOnly}
         >
           Heading
         </button>
@@ -382,19 +385,13 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
           type="button"
           className={editor.isActive("bulletList") ? "active" : ""}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
+          disabled={readOnly}
         >
           Bullet List
         </button>
       </div>
 
       <EditorContent editor={editor} className="editor-surface" />
-
-      <AITextAssistant
-        documentId={documentId}
-        editor={editor}
-        version={currentVersion}
-        onVersionSaved={handleVersionSaved}
-      />
 
       <div className="editor-footer">
         <div className="editor-status" aria-live="polite">

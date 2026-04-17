@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import type { LoginPayload } from "../types/auth";
 
@@ -76,6 +76,10 @@ function Login() {
           <button type="submit" disabled={isLoading}>
             {isLoading ? "Signing in..." : "Login"}
           </button>
+
+          <p className="muted" style={{ textAlign: "center", marginTop: "0.5rem" }}>
+            No account yet? <Link to="/register">Create one</Link>
+          </p>
         </form>
       </section>
     </div>

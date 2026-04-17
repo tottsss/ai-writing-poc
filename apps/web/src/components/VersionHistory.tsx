@@ -234,12 +234,16 @@ function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
     }
 
     try {
+      const versionIdNumeric = Number(record.id);
+      if (!Number.isFinite(versionIdNumeric) || versionIdNumeric < 1) {
+        throw new Error("Invalid version id.");
+      }
+
       const response = await fetch(`/documents/${documentId}/restore`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          version: record.version,
-          versionId: record.id,
+          version_id: versionIdNumeric,
         }),
       });
 
