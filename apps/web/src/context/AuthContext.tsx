@@ -27,19 +27,16 @@ export const AuthContext = createContext<AuthContextValue | undefined>(
   undefined
 );
 
-function createMockTokens(email: string): AuthTokens {
-  const safeEmail = email.trim().toLowerCase() || "demo@local";
-  const issuedAt = Date.now();
-
-  return {
-    accessToken: `mock_access_${safeEmail}_${issuedAt}`,
-    refreshToken: `mock_refresh_${safeEmail}_${issuedAt}`,
-  };
-}
-
 function getErrorMessage(data: unknown): string | null {
   if (!data || typeof data !== "object") {
     return null;
+  }
+
+  if (
+    "detail" in data &&
+    typeof (data as { detail?: unknown }).detail === "string"
+  ) {
+    return (data as { detail: string }).detail;
   }
 
   if (
@@ -85,20 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokens, setTokens] = useState<AuthTokens | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isMockLoginEnabled =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1") &&
-    window.localStorage.getItem("disable_mock_login") !== "true";
 
   const login = useCallback(async (payload: LoginPayload) => {
     setIsLoading(true);
     setError(null);
-
-    const applyMockLogin = () => {
-      setTokens(createMockTokens(payload.email));
-      setError(null);
-    };
 
     try {
       const response = await fetch("/login", {
@@ -114,11 +101,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined as unknown);
 
       if (!response.ok) {
-        if (isMockLoginEnabled && response.status === 404) {
-          applyMockLogin();
-          return;
-        }
-
         const message =
           getErrorMessage(responseData) ??
           "Login failed. Check your credentials and try again.";
@@ -127,21 +109,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const nextTokens = parseTokens(responseData);
       if (!nextTokens) {
-        if (isMockLoginEnabled) {
-          applyMockLogin();
-          return;
-        }
-
         throw new Error("Invalid login response from server.");
       }
 
       setTokens(nextTokens);
     } catch (caughtError) {
-      if (isMockLoginEnabled) {
-        applyMockLogin();
-        return;
-      }
-
       setTokens(null);
       const message =
         caughtError instanceof Error ? caughtError.message : "Login failed.";
@@ -150,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isMockLoginEnabled]);
+  }, []);
 
   const logout = useCallback(() => {
     setTokens(null);
