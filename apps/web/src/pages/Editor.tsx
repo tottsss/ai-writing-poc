@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import DocumentEditor from "../components/DocumentEditor";
+import SharePanel from "../components/SharePanel";
 import VersionHistory from "../components/VersionHistory";
 import { useAuth } from "../hooks/useAuth";
+
+type Role = "viewer" | "editor" | "owner";
 
 type LoadedDocument = {
   content: string;
   version: number;
   title: string;
+  role: Role;
 };
 
 function parseErrorMessage(data: unknown): string | null {
@@ -28,10 +32,16 @@ function parseDocument(data: unknown): LoadedDocument | null {
   const content = (data as { content?: unknown }).content;
   const version = (data as { version?: unknown }).version;
   const title = (data as { title?: unknown }).title;
-  if (typeof content !== "string" || typeof version !== "number" || typeof title !== "string") {
+  const role = (data as { role?: unknown }).role;
+  if (
+    typeof content !== "string" ||
+    typeof version !== "number" ||
+    typeof title !== "string" ||
+    (role !== "viewer" && role !== "editor" && role !== "owner")
+  ) {
     return null;
   }
-  return { content, version, title };
+  return { content, version, title, role };
 }
 
 function Editor() {
@@ -136,6 +146,7 @@ function Editor() {
               documentId={documentId}
               initialContent={document.content}
               version={document.version}
+              readOnly={document.role === "viewer"}
             />
           ) : null}
         </div>
@@ -147,6 +158,12 @@ function Editor() {
               void loadDocument();
             }}
           />
+          {document ? (
+            <SharePanel
+              documentId={documentId}
+              canManage={document.role === "owner"}
+            />
+          ) : null}
         </aside>
       </div>
     </section>
