@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useAuth } from "../hooks/useAuth";
+import { useDocumentWebSocket } from "../hooks/useDocumentWebSocket";
+import AITextAssistant from "./AITextAssistant";
+import PresenceIndicator from "./PresenceIndicator";
 
 export interface DocumentEditorProps {
   documentId: string;
@@ -120,8 +123,20 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
   );
 
   const saveTimeoutRef = useRef<number | null>(null);
+  const wsThrottleRef = useRef<number | null>(null);
   const lastSavedContentRef = useRef(initialContent);
   const versionRef = useRef(version);
+
+  const {
+    content: wsContent,
+    version: wsVersion,
+    presence,
+    isConnected,
+    connectionState: wsConnectionState,
+    lastError: wsLastError,
+    reconnect: wsReconnect,
+    sendMessage,
+  } = useDocumentWebSocket(documentId, accessToken);
 
   const editor = useEditor({
     extensions: [StarterKit],
@@ -162,6 +177,24 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       editor.commands.setContent(initialContent, false);
     }
   }, [documentId, editor, initialContent]);
+
+  // Apply content that arrived from another user via WebSocket.
+  // Only apply if wsVersion is strictly newer than what we have locally.
+  useEffect(() => {
+    if (wsContent === null || wsVersion === null) {
+      return;
+    }
+    if (wsVersion <= versionRef.current) {
+      return;
+    }
+    versionRef.current = wsVersion;
+    setCurrentVersion(wsVersion);
+    lastSavedContentRef.current = wsContent;
+    setContent(wsContent);
+    if (editor && editor.getHTML() !== wsContent) {
+      editor.commands.setContent(wsContent, false);
+    }
+  }, [editor, wsContent, wsVersion]);
 
   const applyLatestSnapshot = useCallback(
     (snapshot: LatestSnapshot) => {
@@ -317,6 +350,22 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       return;
     }
 
+    // Throttled WS broadcast so other users see keystrokes in near real-time.
+    if (isConnected) {
+      if (wsThrottleRef.current !== null) {
+        window.clearTimeout(wsThrottleRef.current);
+      }
+      wsThrottleRef.current = window.setTimeout(() => {
+        sendMessage({
+          type: "document_update",
+          content,
+          version: versionRef.current,
+        });
+        wsThrottleRef.current = null;
+      }, 150);
+    }
+
+    // REST auto-save every 2s (creates version history entry).
     if (saveTimeoutRef.current !== null) {
       window.clearTimeout(saveTimeoutRef.current);
     }
@@ -330,8 +379,11 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       if (saveTimeoutRef.current !== null) {
         window.clearTimeout(saveTimeoutRef.current);
       }
+      if (wsThrottleRef.current !== null) {
+        window.clearTimeout(wsThrottleRef.current);
+      }
     };
-  }, [content, editor, readOnly, saveDocument]);
+  }, [content, editor, isConnected, readOnly, saveDocument, sendMessage]);
 
   useEffect(() => {
     return () => {
@@ -347,14 +399,19 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
 
   return (
     <div className="editor-form">
-      {readOnly ? (
-        <div
-          className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700"
-          style={{ display: "inline-block", marginBottom: "0.5rem" }}
-        >
-          Read-only • viewer access
-        </div>
-      ) : null}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+        {readOnly ? (
+          <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+            Read-only • viewer access
+          </div>
+        ) : null}
+        <PresenceIndicator
+          users={presence}
+          connectionState={wsConnectionState}
+          lastError={wsLastError}
+          onReconnect={wsReconnect}
+        />
+      </div>
 
       <div className="editor-toolbar" role="toolbar" aria-label="Editor toolbar">
         <button
@@ -392,6 +449,20 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       </div>
 
       <EditorContent editor={editor} className="editor-surface" />
+
+      {!readOnly ? (
+        <AITextAssistant
+          documentId={documentId}
+          editor={editor}
+          version={currentVersion}
+          onVersionSaved={(savedContent, savedVersion) => {
+            versionRef.current = savedVersion;
+            setCurrentVersion(savedVersion);
+            lastSavedContentRef.current = savedContent;
+            setContent(savedContent);
+          }}
+        />
+      ) : null}
 
       <div className="editor-footer">
         <div className="editor-status" aria-live="polite">
