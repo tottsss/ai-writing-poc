@@ -17,7 +17,16 @@ def list_versions(
     db: Session = Depends(get_db),
 ) -> list[VersionRead]:
     rows = version_service.list_versions(db, document_id=ctx.document.id)
-    return [VersionRead.model_validate(row) for row in rows]
+    return [
+        VersionRead(
+            id=v.id,
+            version=v.version_number,
+            version_type=v.version_type,
+            author=author,
+            timestamp=v.created_at,
+        )
+        for v, author in rows
+    ]
 
 
 @router.post("/restore", response_model=DocumentRead)

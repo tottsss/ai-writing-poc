@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import AITextAssistant from "./AITextAssistant";
 import { useAuth } from "../hooks/useAuth";
 
 export interface DocumentEditorProps {
@@ -165,24 +164,6 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
 
       if (editor && editor.getHTML() !== snapshot.content) {
         editor.commands.setContent(snapshot.content, false);
-      }
-    },
-    [editor]
-  );
-
-  const handleVersionSaved = useCallback(
-    (savedContent: string, savedVersion: number) => {
-      versionRef.current = savedVersion;
-      setCurrentVersion(savedVersion);
-      lastSavedContentRef.current = savedContent;
-      setContent(savedContent);
-      setSaveStatus("saved");
-      setSaveError(null);
-      setIsConflictModalOpen(false);
-      setConflictSnapshot(null);
-
-      if (editor && editor.getHTML() !== savedContent) {
-        editor.commands.setContent(savedContent, false);
       }
     },
     [editor]
@@ -388,13 +369,6 @@ function DocumentEditor({ documentId, initialContent, version }: DocumentEditorP
       </div>
 
       <EditorContent editor={editor} className="editor-surface" />
-
-      <AITextAssistant
-        documentId={documentId}
-        editor={editor}
-        version={currentVersion}
-        onVersionSaved={handleVersionSaved}
-      />
 
       <div className="editor-footer">
         <div className="editor-status" aria-live="polite">

@@ -9,10 +9,10 @@ class VersionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    version_number: int
+    version: int
     version_type: VersionType
-    created_by: int | None
-    created_at: datetime
+    author: str
+    timestamp: datetime
 
     @field_serializer("id")
     def _id_to_str(self, v: int) -> str:

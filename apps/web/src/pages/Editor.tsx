@@ -1,48 +1,98 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import DocumentEditor from "../components/DocumentEditor";
-import PresenceIndicator from "../components/PresenceIndicator";
 import VersionHistory from "../components/VersionHistory";
-import { useDocumentWebSocket } from "../hooks/useDocumentWebSocket";
+import { useAuth } from "../hooks/useAuth";
+
+type LoadedDocument = {
+  content: string;
+  version: number;
+  title: string;
+};
+
+function parseErrorMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const detail = (data as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim().length > 0) {
+    return detail;
+  }
+  return null;
+}
+
+function parseDocument(data: unknown): LoadedDocument | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const content = (data as { content?: unknown }).content;
+  const version = (data as { version?: unknown }).version;
+  const title = (data as { title?: unknown }).title;
+  if (typeof content !== "string" || typeof version !== "number" || typeof title !== "string") {
+    return null;
+  }
+  return { content, version, title };
+}
 
 function Editor() {
   const { id } = useParams<{ id: string }>();
   const documentId = id ?? "";
+  const { accessToken, logout } = useAuth();
 
-  const fallbackInitialContent = useMemo(
-    () =>
-      `<p><strong>Document ${documentId}</strong></p><p>Write your academic draft here and your changes will auto-save.</p>`,
-    [documentId]
-  );
-  const [editorContent, setEditorContent] = useState(fallbackInitialContent);
-  const [editorVersion, setEditorVersion] = useState(1);
+  const [document, setDocument] = useState<LoadedDocument | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const {
-    content: liveContent,
-    version: liveVersion,
-    presence,
-    connectionState,
-    lastError,
-    reconnect,
-  } = useDocumentWebSocket(documentId);
-
-  useEffect(() => {
-    setEditorContent(fallbackInitialContent);
-    setEditorVersion(1);
-  }, [documentId, fallbackInitialContent]);
-
-  useEffect(() => {
-    if (!liveContent || liveVersion === null) {
+  const loadDocument = useCallback(async () => {
+    if (!documentId) {
       return;
     }
 
-    if (liveVersion <= editorVersion) {
-      return;
+    setIsLoading(true);
+    setLoadError(null);
+
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
     }
 
-    setEditorContent(liveContent);
-    setEditorVersion(liveVersion);
-  }, [editorVersion, liveContent, liveVersion]);
+    try {
+      const response = await fetch(`/documents/${documentId}`, {
+        method: "GET",
+        headers,
+      });
+
+      const body: unknown = await response.json().catch(() => undefined);
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          parseErrorMessage(body) ?? "Unable to load document."
+        );
+      }
+
+      const parsed = parseDocument(body);
+      if (!parsed) {
+        throw new Error("Invalid document response from server.");
+      }
+
+      setDocument(parsed);
+    } catch (caught) {
+      setLoadError(
+        caught instanceof Error ? caught.message : "Unable to load document."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken, documentId, logout]);
+
+  useEffect(() => {
+    void loadDocument();
+  }, [loadDocument]);
 
   if (!documentId) {
     return (
@@ -61,7 +111,7 @@ function Editor() {
             Active Draft
           </p>
           <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
-            Document {documentId}
+            {document?.title ?? `Document ${documentId}`}
           </h2>
         </div>
         <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
@@ -71,26 +121,30 @@ function Editor() {
 
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <DocumentEditor
-            documentId={documentId}
-            initialContent={editorContent}
-            version={editorVersion}
-          />
+          {isLoading ? (
+            <p className="muted">Loading document...</p>
+          ) : loadError ? (
+            <div>
+              <p className="error-text">{loadError}</p>
+              <button type="button" onClick={() => void loadDocument()}>
+                Retry
+              </button>
+            </div>
+          ) : document ? (
+            <DocumentEditor
+              key={documentId}
+              documentId={documentId}
+              initialContent={document.content}
+              version={document.version}
+            />
+          ) : null}
         </div>
 
         <aside className="space-y-4">
-          <PresenceIndicator
-            users={presence}
-            connectionState={connectionState}
-            lastError={lastError}
-            onReconnect={reconnect}
-          />
           <VersionHistory
             documentId={documentId}
-            onRestoreSuccess={(restoredVersion) => {
-              setEditorVersion((currentVersion) =>
-                restoredVersion > currentVersion ? restoredVersion : currentVersion
-              );
+            onRestoreSuccess={() => {
+              void loadDocument();
             }}
           />
         </aside>

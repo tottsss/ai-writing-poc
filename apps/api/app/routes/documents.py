@@ -68,7 +68,7 @@ def update_document(
         document=ctx.document,
         user=ctx.user,
         new_content=payload.content,
-        base_version=payload.base_version,
+        base_version=payload.version,
     )
     serialized = document_service.serialize_document(db, document=document, role=ctx.role)
     return DocumentRead(**serialized)

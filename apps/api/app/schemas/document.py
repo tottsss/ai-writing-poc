@@ -12,7 +12,7 @@ class DocumentCreate(BaseModel):
 
 class DocumentUpdate(BaseModel):
     content: str
-    base_version: int = Field(ge=1)
+    version: int = Field(ge=1)
 
 
 class DocumentSummary(BaseModel):
