@@ -130,8 +130,6 @@ When a user invokes an AI feature:
 
 ## Environment variables
 
-Copy `apps/api/.env.example` to `apps/api/.env` and fill in the values.
-
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./dev.db` | SQLAlchemy DB URL |
