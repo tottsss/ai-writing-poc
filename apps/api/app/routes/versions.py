@@ -33,7 +33,7 @@ def list_versions(
 @router.post("/restore", response_model=DocumentRead)
 async def restore_version(
     payload: RestoreRequest,
-    ctx: DocumentContext = Depends(require_role(Role.editor)),
+    ctx: DocumentContext = Depends(require_role(Role.owner)),
     db: Session = Depends(get_db),
 ) -> DocumentRead:
     document = document_service.restore_document(
