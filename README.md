@@ -20,6 +20,10 @@ cp apps/api/.env.example apps/api/.env   # edit JWT_SECRET at minimum
 ./run.sh
 ```
 
+A top-level [`.env.example`](.env.example) documents every variable in one place
+for reviewers. The backend reads `apps/api/.env`; the frontend has no runtime
+env today.
+
 - Backend: <http://localhost:8000> — `/docs` for the interactive OpenAPI UI
 - Frontend: <http://localhost:5173>
 
@@ -56,6 +60,60 @@ return `StreamingResponse(text/plain)` — tokens are yielded progressively.
 The LLM provider is abstracted behind `LLMProvider` (abc).  Set `PROVIDER=mock`
 (default, no API key needed) or add a concrete provider class and set
 `PROVIDER=openai` etc.
+
+Frontend UX:
+
+- Two features (Paraphrase + Summarize) on the selected text.
+- Streaming preview while generating, with a **Cancel** button that aborts the
+  request and discards partial output (§3.2).
+- Once streaming completes, the suggestion is shown in a side-by-side
+  **original vs suggestion diff** panel (word-level LCS). Accept/Reject buttons.
+- After Accept, an **Undo AI change** button appears for 15 s and reverts the
+  document to its pre-acceptance snapshot (§3.3).
+- AI History panel in the editor sidebar lists every past interaction with
+  Accepted / Rejected / Pending status. Reviewers can mark an outcome via
+  `PATCH /documents/{id}/ai/history/{interactionId}?accepted=true|false` (§3.5).
+- For paraphrase, only a ±2 000-char window around the selection is sent if the
+  document exceeds 4 000 chars, to cap prompt size (§3.4).
+
+### AI suggestions during concurrent collaboration (§3.3)
+
+When a user invokes an AI feature:
+
+1. The selection snapshot is captured client-side; the diff panel is rendered
+   against the *local* editor state only — the suggestion is never broadcast
+   over the WebSocket to other editors.
+2. On **Accept**, the replacement is applied locally and persisted with
+   `PUT /documents/{id}` carrying the version the client last saw (OCC).
+3. If another editor committed a change in the meantime, the server returns
+   **409 Conflict**. The conflict modal then asks the user to reload the
+   latest version, discarding the AI result. This prevents the AI accept
+   from silently clobbering a collaborator's edit.
+4. On successful accept, the `document_updated` broadcast from the normal
+   save path pushes the new version to every other editor, so everyone
+   converges without needing a separate AI-specific channel.
+5. Undo within the 15-second window performs the same OCC-protected round
+   trip with the original content.
+
+### Session & token handling
+
+- Access + refresh tokens are persisted in `localStorage`, so the session
+  survives page refresh (§1.1).
+- A shared `authFetch` helper attaches the `Authorization` header and, on `401`,
+  transparently calls `/refresh` once and retries the original request. If the
+  refresh fails, the user is logged out.
+- The WebSocket reconnect loop also calls `/refresh` on `1008 POLICY_VIOLATION`
+  closes before retrying.
+
+### Presence, typing, offline
+
+- Presence list renders avatar badges for each active user.
+- Typing indicator: each editor broadcasts `{type: "typing"}` once every 2 s
+  while the user is actively editing; other clients show a "typing…" suffix
+  that auto-clears after 3 s of silence (§2.2).
+- Offline banner: when `navigator.onLine` flips to `false`, the editor shows a
+  warning chip. When the user comes back online, the pending local state is
+  flushed via the normal REST save path (§2.3).
 
 ---
 

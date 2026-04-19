@@ -112,10 +112,16 @@ returned a hardcoded string after a 1.5 s `setTimeout`.  No real streaming.
 - A `LLMProvider` abstract class with a `MockProvider` (streams word-by-word
   with realistic delays, no API key required) and a `PROVIDER` env-var hook for
   swapping to a real LLM (e.g., OpenAI) in one place.
-- All prompt templates live in a single `PROMPTS` dict in `ai_service.py`,
-  never hardcoded in route handlers.
-- Every AI call is logged to an `ai_interactions` table (input, response,
-  accept/reject status).
+- All prompt templates live in a dedicated `app/prompts.py` module (not
+  hardcoded in route handlers) with a `get_prompt(feature, **kwargs)` helper.
+- Every AI call is logged to an `ai_interactions` table with the five fields
+  required by §3.5: **input, prompt, model, response, accept/reject status**
+  (plus document_id, user_id, and timestamp).
+- Frontend suggestion UX: side-by-side diff panel (LCS word-level), Accept /
+  Reject / **Edit suggestion before applying**, and a session-scoped undo
+  stack so every accepted AI change can be reverted via OCC-checked PUT.
+- Strategy during concurrent collaboration documented in README §"AI
+  suggestions during concurrent collaboration".
 
 **Why:** Assignment 2 Part 3 requires streaming (hard requirement), at least two
 features, configurable prompts, and provider abstraction.
