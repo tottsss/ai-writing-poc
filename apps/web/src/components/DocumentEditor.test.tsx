@@ -110,7 +110,7 @@ describe("DocumentEditor", () => {
     await user.type(editorInput, "<p>Updated content</p>");
 
     await act(async () => {
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(5000);
       await Promise.resolve();
     });
 

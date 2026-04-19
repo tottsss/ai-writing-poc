@@ -3,6 +3,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useAuth } from "../hooks/useAuth";
 import { useDocumentWebSocket } from "../hooks/useDocumentWebSocket";
+import { authFetch } from "../lib/apiClient";
 import AITextAssistant from "./AITextAssistant";
 import PresenceIndicator from "./PresenceIndicator";
 
@@ -111,7 +112,11 @@ function parseLatestSnapshot(data: unknown): LatestSnapshot | null {
 }
 
 function DocumentEditor({ documentId, initialContent, version, readOnly = false }: DocumentEditorProps) {
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { accessToken, logout } = auth;
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== "undefined" ? !navigator.onLine : false
+  );
   const [content, setContent] = useState(initialContent);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -131,12 +136,41 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
     content: wsContent,
     version: wsVersion,
     presence,
+    typingUserIds,
     isConnected,
     connectionState: wsConnectionState,
     lastError: wsLastError,
     reconnect: wsReconnect,
     sendMessage,
-  } = useDocumentWebSocket(documentId, accessToken);
+    sendTyping,
+  } = useDocumentWebSocket(documentId, accessToken, auth.refresh);
+
+  const lastTypingSignalRef = useRef(0);
+  const typingStopTimeoutRef = useRef<number | null>(null);
+
+  const signalTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTypingSignalRef.current > 2000) {
+      sendTyping(true);
+      lastTypingSignalRef.current = now;
+    }
+    if (typingStopTimeoutRef.current !== null) {
+      window.clearTimeout(typingStopTimeoutRef.current);
+    }
+    typingStopTimeoutRef.current = window.setTimeout(() => {
+      sendTyping(false);
+      lastTypingSignalRef.current = 0;
+      typingStopTimeoutRef.current = null;
+    }, 3000);
+  }, [sendTyping]);
+
+  useEffect(() => {
+    return () => {
+      if (typingStopTimeoutRef.current !== null) {
+        window.clearTimeout(typingStopTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const editor = useEditor({
     extensions: [StarterKit],
@@ -150,6 +184,7 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       setContent(nextContent);
       setSaveStatus("idle");
       setSaveError(null);
+      signalTyping();
     },
   });
 
@@ -219,26 +254,19 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       setSaveStatus("saving");
       setSaveError(null);
 
-      let headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
-
-      if (accessToken) {
-        headers = {
-          ...headers,
-          Authorization: `Bearer ${accessToken}`,
-        };
-      }
-
       try {
-        const response = await fetch(`/documents/${documentId}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({
-            content: nextContent,
-            version: versionRef.current,
-          }),
-        });
+        const response = await authFetch(
+          `/documents/${documentId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: nextContent,
+              version: versionRef.current,
+            }),
+          },
+          auth
+        );
 
         const responseData: unknown = await response
           .json()
@@ -282,25 +310,19 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
         );
       }
     },
-    [accessToken, documentId, logout]
+    [auth, documentId, logout]
   );
 
   const reloadLatestVersion = useCallback(async () => {
     setIsReloadingLatest(true);
     setSaveError(null);
 
-    let headers: HeadersInit = {};
-    if (accessToken) {
-      headers = {
-        Authorization: `Bearer ${accessToken}`,
-      };
-    }
-
     try {
-      const response = await fetch(`/documents/${documentId}`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authFetch(
+        `/documents/${documentId}`,
+        { method: "GET" },
+        auth
+      );
 
       const responseData: unknown = await response
         .json()
@@ -338,7 +360,7 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
     } finally {
       setIsReloadingLatest(false);
     }
-  }, [accessToken, applyLatestSnapshot, conflictSnapshot, documentId, logout]);
+  }, [applyLatestSnapshot, auth, conflictSnapshot, documentId, logout]);
 
   useEffect(() => {
     if (!editor || readOnly) {
@@ -365,7 +387,9 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
       }, 150);
     }
 
-    // REST auto-save every 2s (creates version history entry).
+    // REST auto-save after 5s of inactivity (creates a version history
+    // entry). Debounced: every keystroke resets the timer so we don't spam
+    // versions on every character.
     if (saveTimeoutRef.current !== null) {
       window.clearTimeout(saveTimeoutRef.current);
     }
@@ -373,7 +397,7 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
     saveTimeoutRef.current = window.setTimeout(() => {
       void saveDocument(content);
       saveTimeoutRef.current = null;
-    }, 2000);
+    }, 5000);
 
     return () => {
       if (saveTimeoutRef.current !== null) {
@@ -393,6 +417,22 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
     };
   }, []);
 
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      if (content !== lastSavedContentRef.current) {
+        void saveDocument(content);
+      }
+    };
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [content, saveDocument]);
+
   if (!editor) {
     return <p className="muted">Loading editor...</p>;
   }
@@ -405,8 +445,14 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
             Read-only • viewer access
           </div>
         ) : null}
+        {isOffline ? (
+          <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+            Offline — changes will sync when reconnected
+          </div>
+        ) : null}
         <PresenceIndicator
           users={presence}
+          typingUserIds={typingUserIds}
           connectionState={wsConnectionState}
           lastError={wsLastError}
           onReconnect={wsReconnect}
@@ -446,6 +492,14 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
         >
           Bullet List
         </button>
+        <button
+          type="button"
+          className={editor.isActive("codeBlock") ? "active" : ""}
+          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          disabled={readOnly}
+        >
+          Code Block
+        </button>
       </div>
 
       <EditorContent editor={editor} className="editor-surface" />
@@ -466,8 +520,21 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
 
       <div className="editor-footer">
         <div className="editor-status" aria-live="polite">
-          {saveStatus === "saving" ? <span className="muted">Saving...</span> : null}
-          {saveStatus === "saved" ? <span className="save-success">Saved</span> : null}
+          {saveStatus === "idle" ? (
+            <span className="save-indicator save-indicator-pending">
+              <span className="save-dot" /> Unsaved changes…
+            </span>
+          ) : null}
+          {saveStatus === "saving" ? (
+            <span className="save-indicator save-indicator-saving">
+              <span className="save-dot" /> Saving…
+            </span>
+          ) : null}
+          {saveStatus === "saved" ? (
+            <span className="save-indicator save-indicator-saved">
+              <span className="save-dot" /> Saved
+            </span>
+          ) : null}
           {saveStatus === "error" ? (
             <span className="error-text">{saveError ?? "Failed to save document."}</span>
           ) : null}
