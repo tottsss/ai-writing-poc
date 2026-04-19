@@ -316,7 +316,7 @@ The README includes:
 - deviations from Assignment 1
 
 ### Deviations
-
+o
 All architectural changes from Assignment 1 are documented in `DEVIATIONS.md`, including:
 
 - transition to JWT authentication
