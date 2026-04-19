@@ -13,6 +13,7 @@ export default defineConfig({
       '/refresh': backend,
       '/me': backend,
       '/documents': backend,
+      '/share-links': backend,
       '/ws': { target: backend.replace('http', 'ws'), ws: true },
     },
   },
