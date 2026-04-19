@@ -275,15 +275,35 @@ function AITextAssistant({
     nextContent: string,
     baseVersion: number
   ): Promise<number | null> => {
-    const response = await authFetch(
-      `/documents/${documentId}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: nextContent, version: baseVersion }),
-      },
-      auth
-    );
+    const attempt = async (version: number) =>
+      authFetch(
+        `/documents/${documentId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: nextContent, version }),
+        },
+        auth
+      );
+
+    let response = await attempt(baseVersion);
+
+    // OCC self-heal: when a peer's REST autosave bumps the server version
+    // between our AI stream start and Accept click, retry once against
+    // the latest version the server just reported.
+    if (response.status === 409) {
+      const conflictData: unknown = await response
+        .json()
+        .catch(() => undefined as unknown);
+      const detail = (conflictData as { detail?: unknown } | null)?.detail;
+      const latestVersion =
+        detail && typeof detail === "object"
+          ? (detail as { latest_version?: unknown }).latest_version
+          : undefined;
+      if (typeof latestVersion === "number" && latestVersion !== baseVersion) {
+        response = await attempt(latestVersion);
+      }
+    }
 
     const responseData: unknown = await response
       .json()
