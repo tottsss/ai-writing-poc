@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 type DiffType = "equal" | "remove" | "add";
@@ -8,10 +8,19 @@ interface DiffOperation {
   value: string;
 }
 
-interface DiffSegment {
+// A timeline item is either an equal run (always kept) or a change chunk
+// (contiguous removes + adds). The user toggles each change chunk.
+interface EqualItem {
+  kind: "equal";
   value: string;
-  changed: boolean;
 }
+interface ChangeItem {
+  kind: "change";
+  index: number;
+  removed: string;
+  added: string;
+}
+type TimelineItem = EqualItem | ChangeItem;
 
 export interface TextSuggestionDiffPanelProps {
   originalText: string;
@@ -80,34 +89,55 @@ function buildDiffOperations(
   return operations;
 }
 
-function toRenderSegments(
-  operations: DiffOperation[],
-  panel: "original" | "suggestion"
-): DiffSegment[] {
-  const relevantOperations =
-    panel === "original"
-      ? operations.filter((operation) => operation.type !== "add")
-      : operations.filter((operation) => operation.type !== "remove");
-
-  const segments: DiffSegment[] = [];
-
-  for (const operation of relevantOperations) {
-    const changed =
-      panel === "original" ? operation.type === "remove" : operation.type === "add";
-
-    const lastSegment = segments[segments.length - 1];
-    if (lastSegment && lastSegment.changed === changed) {
-      lastSegment.value += operation.value;
+function buildTimeline(operations: DiffOperation[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  let changeIndex = 0;
+  let i = 0;
+  while (i < operations.length) {
+    const op = operations[i];
+    if (op.type === "equal") {
+      let value = "";
+      while (i < operations.length && operations[i].type === "equal") {
+        value += operations[i].value;
+        i += 1;
+      }
+      items.push({ kind: "equal", value });
       continue;
     }
-
-    segments.push({
-      value: operation.value,
-      changed,
-    });
+    let removed = "";
+    let added = "";
+    while (
+      i < operations.length &&
+      (operations[i].type === "remove" || operations[i].type === "add")
+    ) {
+      if (operations[i].type === "remove") {
+        removed += operations[i].value;
+      } else {
+        added += operations[i].value;
+      }
+      i += 1;
+    }
+    items.push({ kind: "change", index: changeIndex, removed, added });
+    changeIndex += 1;
   }
+  return items;
+}
 
-  return segments;
+function reconstruct(
+  timeline: TimelineItem[],
+  acceptedChunks: Set<number>
+): string {
+  let result = "";
+  for (const item of timeline) {
+    if (item.kind === "equal") {
+      result += item.value;
+    } else if (acceptedChunks.has(item.index)) {
+      result += item.added;
+    } else {
+      result += item.removed;
+    }
+  }
+  return result;
 }
 
 function TextSuggestionDiffPanel({
@@ -116,13 +146,60 @@ function TextSuggestionDiffPanel({
   onAccept,
   onReject,
 }: TextSuggestionDiffPanelProps) {
-  const { originalSegments, suggestionSegments } = useMemo(() => {
-    const operations = buildDiffOperations(tokenize(originalText), tokenize(suggestedText));
-    return {
-      originalSegments: toRenderSegments(operations, "original"),
-      suggestionSegments: toRenderSegments(operations, "suggestion"),
-    };
+  const timeline = useMemo(() => {
+    const ops = buildDiffOperations(tokenize(originalText), tokenize(suggestedText));
+    return buildTimeline(ops);
   }, [originalText, suggestedText]);
+
+  const changeCount = useMemo(
+    () => timeline.filter((item) => item.kind === "change").length,
+    [timeline]
+  );
+
+  // Default: accept every change chunk (= full-accept, same as old behaviour).
+  const [acceptedChunks, setAcceptedChunks] = useState<Set<number>>(() => {
+    const all = new Set<number>();
+    timeline.forEach((item) => {
+      if (item.kind === "change") all.add(item.index);
+    });
+    return all;
+  });
+
+  // Reset when the suggestion changes (new AI response).
+  useEffect(() => {
+    const all = new Set<number>();
+    timeline.forEach((item) => {
+      if (item.kind === "change") all.add(item.index);
+    });
+    setAcceptedChunks(all);
+  }, [timeline]);
+
+  const previewText = useMemo(
+    () => reconstruct(timeline, acceptedChunks),
+    [timeline, acceptedChunks]
+  );
+
+  const toggle = (index: number) => {
+    setAcceptedChunks((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const setAll = (value: boolean) => {
+    const next = new Set<number>();
+    if (value) {
+      timeline.forEach((item) => {
+        if (item.kind === "change") next.add(item.index);
+      });
+    }
+    setAcceptedChunks(next);
+  };
+
+  const acceptDisabled =
+    previewText.trim().length === 0 && suggestedText.trim().length === 0;
 
   return (
     <section style={styles.panel}>
@@ -131,10 +208,12 @@ function TextSuggestionDiffPanel({
         <div style={styles.actions}>
           <button
             type="button"
-            onClick={() => onAccept(suggestedText)}
-            disabled={suggestedText.trim().length === 0}
+            onClick={() => onAccept(previewText)}
+            disabled={acceptDisabled}
           >
-            Accept
+            {acceptedChunks.size === changeCount
+              ? "Accept all"
+              : `Accept selected (${acceptedChunks.size}/${changeCount})`}
           </button>
           <button type="button" className="button-secondary" onClick={onReject}>
             Reject
@@ -142,32 +221,72 @@ function TextSuggestionDiffPanel({
         </div>
       </header>
 
+      {changeCount > 0 ? (
+        <div style={styles.bulkRow}>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => setAll(true)}
+          >
+            Select all changes
+          </button>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => setAll(false)}
+          >
+            Clear all
+          </button>
+        </div>
+      ) : null}
+
       <div style={styles.columns}>
         <article style={styles.column}>
-          <h4 style={styles.columnTitle}>Original</h4>
+          <h4 style={styles.columnTitle}>Inline diff</h4>
           <p style={styles.textBlock}>
-            {originalSegments.map((segment, index) => (
-              <span
-                key={`original-${index}`}
-                style={segment.changed ? styles.removedText : styles.plainText}
-              >
-                {segment.value}
-              </span>
-            ))}
+            {timeline.map((item, idx) => {
+              if (item.kind === "equal") {
+                return <span key={`t-${idx}`}>{item.value}</span>;
+              }
+              const accepted = acceptedChunks.has(item.index);
+              return (
+                <label
+                  key={`t-${idx}`}
+                  aria-label={`Toggle change ${item.index + 1}`}
+                  style={styles.changeGroup}
+                >
+                  <input
+                    type="checkbox"
+                    checked={accepted}
+                    onChange={() => toggle(item.index)}
+                    style={styles.checkbox}
+                  />
+                  {item.removed.length > 0 ? (
+                    <span
+                      style={
+                        accepted ? styles.removedTextStruck : styles.plainText
+                      }
+                    >
+                      {item.removed}
+                    </span>
+                  ) : null}
+                  {item.added.length > 0 ? (
+                    <span
+                      style={accepted ? styles.addedText : styles.addedTextDim}
+                    >
+                      {item.added}
+                    </span>
+                  ) : null}
+                </label>
+              );
+            })}
           </p>
         </article>
 
         <article style={styles.column}>
-          <h4 style={styles.columnTitle}>AI Suggestion</h4>
-          <p style={styles.textBlock}>
-            {suggestionSegments.map((segment, index) => (
-              <span
-                key={`suggestion-${index}`}
-                style={segment.changed ? styles.addedText : styles.plainText}
-              >
-                {segment.value}
-              </span>
-            ))}
+          <h4 style={styles.columnTitle}>Preview (will be applied)</h4>
+          <p style={styles.textBlock} aria-label="Partial acceptance preview">
+            {previewText}
           </p>
         </article>
       </div>
@@ -199,6 +318,10 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     gap: "0.5rem",
   },
+  bulkRow: {
+    display: "flex",
+    gap: "0.4rem",
+  },
   columns: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
@@ -223,12 +346,31 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "0.92rem",
   },
   plainText: {},
-  removedText: {
+  changeGroup: {
+    display: "inline",
+    cursor: "pointer",
+    padding: "0 2px",
+    borderRadius: "4px",
+    outline: "1px dashed #d0d5dd",
+  },
+  checkbox: {
+    width: "0.9rem",
+    height: "0.9rem",
+    verticalAlign: "middle",
+    marginRight: "2px",
+  },
+  removedTextStruck: {
     background: "rgba(217, 45, 32, 0.16)",
+    textDecoration: "line-through",
     borderRadius: "4px",
   },
   addedText: {
     background: "rgba(18, 183, 106, 0.16)",
+    borderRadius: "4px",
+  },
+  addedTextDim: {
+    color: "#98a2b3",
+    textDecoration: "line-through",
     borderRadius: "4px",
   },
 };

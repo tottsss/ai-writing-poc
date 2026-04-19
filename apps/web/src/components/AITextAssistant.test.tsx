@@ -110,7 +110,7 @@ describe("AITextAssistant (AI suggestion UI)", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: /^accept$/i })
+        screen.getByRole("button", { name: /^accept (all|selected)/i })
       ).toBeInTheDocument();
     });
 
@@ -120,7 +120,7 @@ describe("AITextAssistant (AI suggestion UI)", () => {
     ).toBeInTheDocument();
 
     await act(async () => {
-      await user.click(screen.getByRole("button", { name: /^accept$/i }));
+      await user.click(screen.getByRole("button", { name: /^accept (all|selected)/i }));
     });
 
     await waitFor(() => {
