@@ -33,20 +33,20 @@ jest.mock("@tiptap/react", () => {
 
     return chain;
   };
-
   const editor = {
-    getHTML: () => latestHtml,
-    commands: {
-      setContent: (content: string) => {
-        latestHtml = content;
-      },
+  getHTML: () => latestHtml,
+  setEditable: jest.fn(),
+  commands: {
+    setContent: (content: string) => {
+      latestHtml = content;
     },
-    isActive: () => false,
+  },
+  isActive: () => false,
+  chain: () => createChain(),
+  can: () => ({
     chain: () => createChain(),
-    can: () => ({
-      chain: () => createChain(),
-    }),
-  };
+  }),
+};
 
   return {
     useEditor: (config: { content?: string; onUpdate?: typeof latestOnUpdate }) => {

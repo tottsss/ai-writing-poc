@@ -46,3 +46,5 @@ def require_role(minimum: Role) -> Callable[..., DocumentContext]:
         return DocumentContext(document=document, role=permission.role, user=user)
 
     return _dep
+
+

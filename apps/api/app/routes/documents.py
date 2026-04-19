@@ -80,3 +80,4 @@ def delete_document(
     db: Session = Depends(get_db),
 ) -> None:
     document_service.delete_document(db, document=ctx.document)
+
