@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(versions.router)
     app.include_router(permissions.router)
+    app.include_router(permissions.share_link_router)
     app.include_router(collaboration.router)
     app.include_router(ai.router)
 

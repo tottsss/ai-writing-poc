@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps.permissions import DocumentContext, require_role
 from app.models.permission import Role
+from app.services.collaboration_service import manager
 from app.schemas.document import DocumentRead
 from app.schemas.version import RestoreRequest, VersionRead
 from app.services import document_service, version_service
@@ -30,13 +31,25 @@ def list_versions(
 
 
 @router.post("/restore", response_model=DocumentRead)
-def restore_version(
+async def restore_version(
     payload: RestoreRequest,
     ctx: DocumentContext = Depends(require_role(Role.owner)),
     db: Session = Depends(get_db),
 ) -> DocumentRead:
     document = document_service.restore_document(
         db, document=ctx.document, version_id=payload.version_id, user=ctx.user
+    )
+    # Push the restored state to every other connected collaborator so
+    # their editor reflects the rollback without needing a page refresh.
+    await manager.broadcast(
+        ctx.document.id,
+        {
+            "type": "document_updated",
+            "payload": {
+                "content": document.current_content,
+                "version": document.version,
+            },
+        },
     )
     serialized = document_service.serialize_document(db, document=document, role=ctx.role)
     return DocumentRead(**serialized)

@@ -214,12 +214,14 @@ function DocumentEditor({ documentId, initialContent, version, readOnly = false 
   }, [documentId, editor, initialContent]);
 
   // Apply content that arrived from another user via WebSocket.
-  // Only apply if wsVersion is strictly newer than what we have locally.
+  // Live-sync updates carry the same version (they don't bump the
+  // snapshot counter), so we apply as long as the version hasn't
+  // regressed. The content-equality check below dedupes our own echo.
   useEffect(() => {
     if (wsContent === null || wsVersion === null) {
       return;
     }
-    if (wsVersion <= versionRef.current) {
+    if (wsVersion < versionRef.current) {
       return;
     }
     versionRef.current = wsVersion;

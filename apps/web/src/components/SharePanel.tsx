@@ -4,6 +4,8 @@ import { useAuth } from "../hooks/useAuth";
 import { authFetch } from "../lib/apiClient";
 
 type Role = "viewer" | "editor" | "owner";
+type ShareRole = "viewer" | "editor";
+type ExpiryChoice = "24" | "168" | "never";
 
 interface PermissionRecord {
   id: string;
@@ -11,6 +13,43 @@ interface PermissionRecord {
   email: string;
   name: string;
   role: Role;
+}
+
+interface ShareLinkRecord {
+  id: string;
+  token: string;
+  role: ShareRole;
+  revoked: boolean;
+  expiresAt: string | null;
+}
+
+function parseShareLink(data: unknown): ShareLinkRecord | null {
+  const raw = asObject(data);
+  if (!raw) return null;
+  const id = raw.id;
+  const token = raw.token;
+  const role = raw.role;
+  const revoked = raw.revoked;
+  const expiresAt = raw.expires_at;
+  if (
+    typeof id !== "string" ||
+    typeof token !== "string" ||
+    (role !== "viewer" && role !== "editor") ||
+    typeof revoked !== "boolean" ||
+    (expiresAt !== null && typeof expiresAt !== "string")
+  ) {
+    return null;
+  }
+  return { id, token, role, revoked, expiresAt };
+}
+
+function formatExpiry(expiresAt: string | null): string {
+  if (expiresAt === null) return "Never expires";
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  const now = new Date();
+  if (date < now) return `Expired ${date.toLocaleString()}`;
+  return `Expires ${date.toLocaleString()}`;
 }
 
 export interface SharePanelProps {
@@ -73,6 +112,14 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
   const [revokingUserId, setRevokingUserId] = useState<string | null>(null);
 
+  const [shareLinks, setShareLinks] = useState<ShareLinkRecord[]>([]);
+  const [linkRole, setLinkRole] = useState<ShareRole>("editor");
+  const [linkExpiry, setLinkExpiry] = useState<ExpiryChoice>("168");
+  const [isCreatingLink, setIsCreatingLink] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [revokingToken, setRevokingToken] = useState<string | null>(null);
+
   const loadPermissions = useCallback(async () => {
     if (!documentId) {
       return;
@@ -110,9 +157,118 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
     }
   }, [auth, documentId, logout]);
 
+  const loadShareLinks = useCallback(async () => {
+    if (!documentId || !canManage) return;
+    try {
+      const response = await authFetch(
+        `/documents/${documentId}/share-links`,
+        { method: "GET" },
+        auth
+      );
+      const body: unknown = await response.json().catch(() => undefined);
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+      if (!response.ok) return;
+      const list = Array.isArray(body) ? body : [];
+      setShareLinks(
+        list
+          .map(parseShareLink)
+          .filter((r): r is ShareLinkRecord => r !== null)
+      );
+    } catch {
+      // Non-fatal; share links are a bonus feature.
+    }
+  }, [auth, canManage, documentId, logout]);
+
   useEffect(() => {
     void loadPermissions();
-  }, [loadPermissions]);
+    void loadShareLinks();
+  }, [loadPermissions, loadShareLinks]);
+
+  const handleCreateLink = async () => {
+    setLinkError(null);
+    setIsCreatingLink(true);
+    try {
+      const body: { role: ShareRole; expires_in_hours?: number } = {
+        role: linkRole,
+      };
+      if (linkExpiry !== "never") {
+        body.expires_in_hours = Number(linkExpiry);
+      }
+      const response = await authFetch(
+        `/documents/${documentId}/share-links`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        auth
+      );
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(
+          parseErrorMessage(payload) ?? "Unable to create share link."
+        );
+      }
+      await loadShareLinks();
+    } catch (caught) {
+      setLinkError(
+        caught instanceof Error ? caught.message : "Unable to create share link."
+      );
+    } finally {
+      setIsCreatingLink(false);
+    }
+  };
+
+  const handleCopy = async (token: string) => {
+    const url = `${window.location.origin}/share/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedToken(token);
+      window.setTimeout(() => {
+        setCopiedToken((current) => (current === token ? null : current));
+      }, 2000);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  };
+
+  const handleRevokeLink = async (token: string) => {
+    const confirmed = window.confirm("Revoke this share link?");
+    if (!confirmed) return;
+    setRevokingToken(token);
+    setLinkError(null);
+    try {
+      const response = await authFetch(
+        `/documents/${documentId}/share-links/${token}`,
+        { method: "DELETE" },
+        auth
+      );
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => undefined);
+        throw new Error(
+          parseErrorMessage(payload) ?? "Unable to revoke link."
+        );
+      }
+      await loadShareLinks();
+    } catch (caught) {
+      setLinkError(
+        caught instanceof Error ? caught.message : "Unable to revoke link."
+      );
+    } finally {
+      setRevokingToken(null);
+    }
+  };
 
   const handleShare = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -249,6 +405,76 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
       ) : (
         <p className="muted">Only the owner can manage sharing.</p>
       )}
+
+      {canManage ? (
+        <div style={{ marginTop: "1rem" }}>
+          <p className="field-label">Share by link</p>
+          <div className="stack">
+            <select
+              aria-label="Share link role"
+              value={linkRole}
+              onChange={(e) => setLinkRole(e.target.value as ShareRole)}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+            </select>
+            <select
+              aria-label="Share link expiry"
+              value={linkExpiry}
+              onChange={(e) => setLinkExpiry(e.target.value as ExpiryChoice)}
+            >
+              <option value="24">Expires in 24 hours</option>
+              <option value="168">Expires in 7 days</option>
+              <option value="never">Never expires</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void handleCreateLink()}
+              disabled={isCreatingLink}
+            >
+              {isCreatingLink ? "Creating..." : "Create share link"}
+            </button>
+            {linkError ? <p className="error-text">{linkError}</p> : null}
+          </div>
+
+          {shareLinks.length > 0 ? (
+            <ul className="version-list" style={{ marginTop: "0.75rem" }}>
+              {shareLinks.map((link) => (
+                <li key={link.id} className="version-item">
+                  <div className="version-meta">
+                    <p className="version-label">
+                      {link.role}
+                      {link.revoked ? " • revoked" : ""}
+                    </p>
+                    <p className="muted">{formatExpiry(link.expiresAt)}</p>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                    {!link.revoked ? (
+                      <>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => void handleCopy(link.token)}
+                        >
+                          {copiedToken === link.token ? "Copied!" : "Copy link"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => void handleRevokeLink(link.token)}
+                          disabled={revokingToken === link.token}
+                        >
+                          {revokingToken === link.token ? "..." : "Revoke"}
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       <div style={{ marginTop: "1rem" }}>
         <p className="field-label">People with access</p>

@@ -160,6 +160,18 @@ cd apps/web
 npm test
 ```
 
+End-to-end (Playwright, bonus): boot the app via `./run.sh` (or start the
+API and Vite dev server separately), then in another terminal run:
+
+```bash
+cd apps/web
+npm run test:e2e
+```
+
+The single golden-path spec covers register → login → create document →
+paraphrase via streaming AI → accept the suggestion. It drives the real
+servers, so any prior server instance must be killed before the run.
+
 ---
 
 ## API documentation
