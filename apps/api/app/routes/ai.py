@@ -35,7 +35,7 @@ from app.deps.permissions import DocumentContext, require_role
 from app.models.ai_interaction import AIInteraction
 from app.models.permission import Role
 from app.schemas.ai import AIInteractionRead, AIParaphraseRequest, AISummarizeRequest
-from app.services.ai_service import PROMPTS, get_provider
+from app.services.ai_service import get_prompt, get_provider
 
 router = APIRouter(prefix="/documents", tags=["ai"])
 logger = logging.getLogger(__name__)
@@ -57,8 +57,12 @@ async def _stream_and_log(
     """
     Stream AI output chunk-by-chunk and persist the full response to the
     ai_interactions table once generation is complete.
+
+    Per §3.5, the audit row records input, prompt, model, response and
+    accept/reject state (the last is filled in later via PATCH).
     """
     provider = get_provider()
+    prompt = get_prompt(feature, text=text)
     collected: list[str] = []
 
     async for chunk in provider.stream(feature=feature, text=text):
@@ -66,16 +70,32 @@ async def _stream_and_log(
         yield chunk.encode()
 
     full_response = "".join(collected)
-    interaction = AIInteraction(
-        document_id=document_id,
-        user_id=user_id,
-        feature=feature,
-        input_text=text,
-        response_text=full_response,
-    )
-    db.add(interaction)
-    db.commit()
-    logger.info("AI interaction logged: doc=%s feature=%s user=%s", document_id, feature, user_id)
+    try:
+        interaction = AIInteraction(
+            document_id=document_id,
+            user_id=user_id,
+            feature=feature,
+            model=provider.MODEL_NAME,
+            prompt=prompt,
+            input_text=text,
+            response_text=full_response,
+        )
+        db.add(interaction)
+        db.commit()
+        logger.info(
+            "AI interaction logged: doc=%s feature=%s user=%s",
+            document_id,
+            feature,
+            user_id,
+        )
+    except Exception:
+        # Never let an audit-log failure leave the HTTP stream half-closed —
+        # swallow the error, roll back the txn, and let the generator exit
+        # cleanly so the client's reader sees `done`. Log for ops visibility.
+        db.rollback()
+        logger.exception(
+            "Failed to persist AI interaction for doc=%s feature=%s", document_id, feature
+        )
 
 
 # ---------------------------------------------------------------------------

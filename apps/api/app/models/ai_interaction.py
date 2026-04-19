@@ -19,6 +19,8 @@ class AIInteraction(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     feature: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     response_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(

@@ -16,6 +16,8 @@ class AIInteractionRead(BaseModel):
     document_id: int
     user_id: int
     feature: str
+    model: str
+    prompt: str
     input_text: str
     response_text: str
     accepted: bool | None
