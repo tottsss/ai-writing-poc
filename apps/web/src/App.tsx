@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AcceptShareLink from "./pages/AcceptShareLink";
 import Dashboard from "./pages/Dashboard";
 import Editor from "./pages/Editor";
 import Login from "./pages/Login";
@@ -25,6 +26,7 @@ function App() {
       <Route path="/register" element={<Register />} />
 
       <Route element={<ProtectedRoute />}>
+        <Route path="/share/:token" element={<AcceptShareLink />} />
         <Route element={<Layout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/editor/:id" element={<Editor />} />
