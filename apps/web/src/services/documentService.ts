@@ -1,3 +1,4 @@
+import { authFetch, type AuthLike } from "../lib/apiClient";
 import type {
   CreateDocumentPayload,
   DocumentSummary,
@@ -44,6 +45,11 @@ function getErrorMessage(data: unknown): string | null {
     return error;
   }
 
+  const detail = payload.detail;
+  if (typeof detail === "string" && detail.trim().length > 0) {
+    return detail;
+  }
+
   return null;
 }
 
@@ -74,16 +80,6 @@ function parseDocument(data: unknown): DocumentSummary | null {
   };
 }
 
-function buildHeaders(accessToken: string | null): HeadersInit {
-  const headers: Record<string, string> = {};
-
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-
-  return headers;
-}
-
 async function parseResponseBody(response: Response): Promise<unknown> {
   return response.json().catch(() => undefined as unknown);
 }
@@ -97,12 +93,9 @@ function toApiError(
 }
 
 export async function fetchDocuments(
-  accessToken: string | null
+  auth: AuthLike
 ): Promise<DocumentsResponse> {
-  const response = await fetch("/documents", {
-    method: "GET",
-    headers: buildHeaders(accessToken),
-  });
+  const response = await authFetch("/documents", { method: "GET" }, auth);
 
   const responseData = await parseResponseBody(response);
 
@@ -131,16 +124,17 @@ export async function fetchDocuments(
 
 export async function createDocument(
   payload: CreateDocumentPayload,
-  accessToken: string | null
+  auth: AuthLike
 ): Promise<DocumentSummary> {
-  const response = await fetch("/documents", {
-    method: "POST",
-    headers: {
-      ...buildHeaders(accessToken),
-      "Content-Type": "application/json",
+  const response = await authFetch(
+    "/documents",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+    auth
+  );
 
   const responseData = await parseResponseBody(response);
 

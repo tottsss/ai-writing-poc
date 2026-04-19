@@ -11,7 +11,8 @@ import type { DocumentSummary } from "../types/document";
 
 function Dashboard() {
   const navigate = useNavigate();
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { logout } = auth;
 
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [newTitle, setNewTitle] = useState("");
@@ -25,7 +26,7 @@ function Dashboard() {
     setLoadError(null);
 
     try {
-      const response = await fetchDocuments(accessToken);
+      const response = await fetchDocuments(auth);
       setDocuments(response.documents);
     } catch (caughtError) {
       if (caughtError instanceof ApiError && caughtError.status === 401) {
@@ -42,7 +43,7 @@ function Dashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, logout, navigate]);
+  }, [auth, logout, navigate]);
 
   useEffect(() => {
     void loadDocuments();
@@ -61,7 +62,7 @@ function Dashboard() {
     setIsCreating(true);
 
     try {
-      const createdDocument = await createDocument({ title }, accessToken);
+      const createdDocument = await createDocument({ title }, auth);
       setDocuments((prev) => [createdDocument, ...prev]);
       setNewTitle("");
       navigate(`/editor/${createdDocument.id}`);

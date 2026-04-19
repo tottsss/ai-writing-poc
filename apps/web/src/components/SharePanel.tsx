@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { authFetch } from "../lib/apiClient";
 
 type Role = "viewer" | "editor" | "owner";
 
@@ -58,7 +59,8 @@ function parsePermission(data: unknown): PermissionRecord | null {
 }
 
 function SharePanel({ documentId, canManage }: SharePanelProps) {
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { logout } = auth;
 
   const [permissions, setPermissions] = useState<PermissionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,14 +73,6 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
   const [revokingUserId, setRevokingUserId] = useState<string | null>(null);
 
-  const authHeaders = useCallback((): Record<string, string> => {
-    const headers: Record<string, string> = {};
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
-    }
-    return headers;
-  }, [accessToken]);
-
   const loadPermissions = useCallback(async () => {
     if (!documentId) {
       return;
@@ -86,9 +80,11 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const response = await fetch(`/documents/${documentId}/permissions`, {
-        headers: authHeaders(),
-      });
+      const response = await authFetch(
+        `/documents/${documentId}/permissions`,
+        { method: "GET" },
+        auth
+      );
       const body: unknown = await response.json().catch(() => undefined);
       if (response.status === 401) {
         logout();
@@ -112,7 +108,7 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [authHeaders, documentId, logout]);
+  }, [auth, documentId, logout]);
 
   useEffect(() => {
     void loadPermissions();
@@ -131,14 +127,15 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
     setIsSharing(true);
 
     try {
-      const response = await fetch(`/documents/${documentId}/share`, {
-        method: "POST",
-        headers: {
-          ...authHeaders(),
-          "Content-Type": "application/json",
+      const response = await authFetch(
+        `/documents/${documentId}/share`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: trimmed, role }),
         },
-        body: JSON.stringify({ email: trimmed, role }),
-      });
+        auth
+      );
 
       const body: unknown = await response.json().catch(() => undefined);
 
@@ -178,12 +175,10 @@ function SharePanel({ documentId, canManage }: SharePanelProps) {
     setRevokingUserId(record.userId);
 
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `/documents/${documentId}/permissions/${record.userId}`,
-        {
-          method: "DELETE",
-          headers: authHeaders(),
-        }
+        { method: "DELETE" },
+        auth
       );
 
       if (response.status === 401) {

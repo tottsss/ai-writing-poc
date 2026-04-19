@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { authFetch } from "../lib/apiClient";
 
 interface VersionRecord {
   id: string;
@@ -139,7 +140,8 @@ function getTimestampValue(timestamp: string): number {
 }
 
 function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { logout } = auth;
   const [versions, setVersions] = useState<VersionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -167,16 +169,12 @@ function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
     setIsLoading(true);
     setError(null);
 
-    let headers: HeadersInit = {};
-    if (accessToken) {
-      headers = { Authorization: `Bearer ${accessToken}` };
-    }
-
     try {
-      const response = await fetch(`/documents/${documentId}/versions`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authFetch(
+        `/documents/${documentId}/versions`,
+        { method: "GET" },
+        auth
+      );
 
       const responseData: unknown = await response
         .json()
@@ -204,7 +202,7 @@ function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, documentId, logout]);
+  }, [auth, documentId, logout]);
 
   useEffect(() => {
     void loadVersions();
@@ -222,30 +220,21 @@ function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
     setError(null);
     setRestoringVersion(record.version);
 
-    let headers: HeadersInit = {
-      "Content-Type": "application/json",
-    };
-
-    if (accessToken) {
-      headers = {
-        ...headers,
-        Authorization: `Bearer ${accessToken}`,
-      };
-    }
-
     try {
       const versionIdNumeric = Number(record.id);
       if (!Number.isFinite(versionIdNumeric) || versionIdNumeric < 1) {
         throw new Error("Invalid version id.");
       }
 
-      const response = await fetch(`/documents/${documentId}/restore`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          version_id: versionIdNumeric,
-        }),
-      });
+      const response = await authFetch(
+        `/documents/${documentId}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ version_id: versionIdNumeric }),
+        },
+        auth
+      );
 
       const responseData: unknown = await response
         .json()

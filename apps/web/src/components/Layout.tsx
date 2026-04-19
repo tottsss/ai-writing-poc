@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { authFetch } from "../lib/apiClient";
 import { ApiError, fetchDocuments } from "../services/documentService";
 import type { DocumentSummary } from "../types/document";
 
@@ -47,7 +48,8 @@ function formatRelative(iso: string): string {
 function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { accessToken, logout } = auth;
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -59,9 +61,7 @@ function Layout() {
     }
 
     try {
-      const response = await fetch("/me", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await authFetch("/me", { method: "GET" }, auth);
       if (response.status === 401) {
         logout();
         return;
@@ -74,7 +74,7 @@ function Layout() {
     } catch {
       setCurrentUser(null);
     }
-  }, [accessToken, logout]);
+  }, [accessToken, auth, logout]);
 
   const loadDocuments = useCallback(async () => {
     if (!accessToken) {
@@ -83,7 +83,7 @@ function Layout() {
     }
 
     try {
-      const response = await fetchDocuments(accessToken);
+      const response = await fetchDocuments(auth);
       setDocuments(response.documents);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -92,7 +92,7 @@ function Layout() {
       }
       setDocuments([]);
     }
-  }, [accessToken, logout]);
+  }, [accessToken, auth, logout]);
 
   useEffect(() => {
     void loadCurrentUser();

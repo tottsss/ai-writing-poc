@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import AIHistoryPanel from "../components/AIHistoryPanel";
 import DocumentEditor from "../components/DocumentEditor";
 import SharePanel from "../components/SharePanel";
 import VersionHistory from "../components/VersionHistory";
 import { useAuth } from "../hooks/useAuth";
+import { authFetch } from "../lib/apiClient";
 
 type Role = "viewer" | "editor" | "owner";
 
@@ -47,7 +49,8 @@ function parseDocument(data: unknown): LoadedDocument | null {
 function Editor() {
   const { id } = useParams<{ id: string }>();
   const documentId = id ?? "";
-  const { accessToken, logout } = useAuth();
+  const auth = useAuth();
+  const { logout } = auth;
 
   const [document, setDocument] = useState<LoadedDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,16 +64,12 @@ function Editor() {
     setIsLoading(true);
     setLoadError(null);
 
-    const headers: Record<string, string> = {};
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
-    }
-
     try {
-      const response = await fetch(`/documents/${documentId}`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authFetch(
+        `/documents/${documentId}`,
+        { method: "GET" },
+        auth
+      );
 
       const body: unknown = await response.json().catch(() => undefined);
 
@@ -98,7 +97,7 @@ function Editor() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, documentId, logout]);
+  }, [auth, documentId, logout]);
 
   useEffect(() => {
     void loadDocument();
@@ -158,6 +157,12 @@ function Editor() {
               void loadDocument();
             }}
           />
+          {document ? (
+            <AIHistoryPanel
+              documentId={documentId}
+              canManage={document.role !== "viewer"}
+            />
+          ) : null}
           {document ? (
             <SharePanel
               documentId={documentId}
