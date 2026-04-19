@@ -16,11 +16,13 @@ export interface UseDocumentWebSocketResult {
   content: string | null;
   version: number | null;
   presence: PresenceUser[];
+  typingUserIds: string[];
   connectionState: DocumentWebSocketConnectionState;
   isConnected: boolean;
   lastError: string | null;
   reconnect: () => void;
   sendMessage: (data: Record<string, unknown>) => void;
+  sendTyping: (isTyping: boolean) => void;
 }
 
 type DocumentUpdatePayload = {
@@ -133,11 +135,14 @@ function parseMessageType(data: unknown): string | null {
 
 export function useDocumentWebSocket(
   documentId: string,
-  token?: string | null
+  token?: string | null,
+  refresh?: () => Promise<string | null>
 ): UseDocumentWebSocketResult {
   const [content, setContent] = useState<string | null>(null);
   const [version, setVersion] = useState<number | null>(null);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
+  const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+  const typingTimeoutsRef = useRef<Map<string, number>>(new Map());
   const [connectionState, setConnectionState] =
     useState<DocumentWebSocketConnectionState>("closed");
   const [lastError, setLastError] = useState<string | null>(null);
@@ -146,12 +151,55 @@ export function useDocumentWebSocket(
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const shouldReconnectRef = useRef(true);
+  const currentTokenRef = useRef<string | null | undefined>(token);
+  const refreshRef = useRef<(() => Promise<string | null>) | undefined>(refresh);
+  const didAttemptRefreshRef = useRef(false);
+  const connectRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    currentTokenRef.current = token;
+  }, [token]);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   const sendMessage = useCallback((data: Record<string, unknown>) => {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(data));
     }
+  }, []);
+
+  const sendTyping = useCallback(
+    (isTyping: boolean) => {
+      sendMessage({ type: "typing", is_typing: isTyping });
+    },
+    [sendMessage]
+  );
+
+  const updateTyping = useCallback((userId: string, isTyping: boolean) => {
+    const existing = typingTimeoutsRef.current.get(userId);
+    if (existing !== undefined) {
+      window.clearTimeout(existing);
+      typingTimeoutsRef.current.delete(userId);
+    }
+
+    if (!isTyping) {
+      setTypingUserIds((prev) => prev.filter((id) => id !== userId));
+      return;
+    }
+
+    setTypingUserIds((prev) =>
+      prev.includes(userId) ? prev : [...prev, userId]
+    );
+
+    // Auto-expire after 3s if no further typing signal arrives.
+    const timeoutId = window.setTimeout(() => {
+      setTypingUserIds((prev) => prev.filter((id) => id !== userId));
+      typingTimeoutsRef.current.delete(userId);
+    }, 3000);
+    typingTimeoutsRef.current.set(userId, timeoutId);
   }, []);
 
   const clearReconnectTimeout = useCallback(() => {
@@ -195,7 +243,10 @@ export function useDocumentWebSocket(
       prev === "reconnecting" ? "reconnecting" : "connecting"
     );
 
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
+    const activeToken = currentTokenRef.current;
+    const tokenParam = activeToken
+      ? `?token=${encodeURIComponent(activeToken)}`
+      : "";
     const socket = new WebSocket(
       `ws://localhost:8000/ws/documents/${encodeURIComponent(documentId)}${tokenParam}`
     );
@@ -203,6 +254,7 @@ export function useDocumentWebSocket(
 
     socket.onopen = () => {
       reconnectAttemptRef.current = 0;
+      didAttemptRefreshRef.current = false;
       setLastError(null);
       setConnectionState("open");
     };
@@ -232,17 +284,53 @@ export function useDocumentWebSocket(
       if (messageType === "presence_update") {
         setPresence(parsePresenceUpdate(data));
       }
+
+      if (messageType === "typing_update") {
+        const root = asObject(data);
+        const payload = root ? asObject(root.payload) ?? root : null;
+        if (!payload) {
+          return;
+        }
+        const userId = payload.user_id ?? payload.userId;
+        const isTyping = payload.is_typing ?? payload.isTyping;
+        if (typeof userId === "string") {
+          updateTyping(userId, Boolean(isTyping));
+        }
+      }
     };
 
     socket.onerror = () => {
       setLastError("WebSocket connection error.");
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       socketRef.current = null;
       setConnectionState("closed");
 
       if (!shouldReconnectRef.current || !documentId) {
+        return;
+      }
+
+      // Auth rejected: try one refresh before resuming the reconnect loop.
+      if (
+        event.code === 1008 &&
+        !didAttemptRefreshRef.current &&
+        refreshRef.current
+      ) {
+        didAttemptRefreshRef.current = true;
+        setConnectionState("reconnecting");
+        void refreshRef.current().then((nextToken) => {
+          if (!shouldReconnectRef.current) {
+            return;
+          }
+          if (nextToken) {
+            currentTokenRef.current = nextToken;
+            reconnectAttemptRef.current = 0;
+            connectRef.current();
+          } else {
+            setLastError("Session expired. Please log in again.");
+          }
+        });
         return;
       }
 
@@ -252,10 +340,14 @@ export function useDocumentWebSocket(
 
       setConnectionState("reconnecting");
       reconnectTimeoutRef.current = window.setTimeout(() => {
-        connect();
+        connectRef.current();
       }, delayMs);
     };
-  }, [clearReconnectTimeout, closeSocket, documentId, token]);
+  }, [clearReconnectTimeout, closeSocket, documentId, updateTyping]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const reconnect = useCallback(() => {
     if (!documentId) {
@@ -271,9 +363,11 @@ export function useDocumentWebSocket(
   useEffect(() => {
     shouldReconnectRef.current = true;
     reconnectAttemptRef.current = 0;
+    didAttemptRefreshRef.current = false;
     setContent(null);
     setVersion(null);
     setPresence([]);
+    setTypingUserIds([]);
     setLastError(null);
 
     if (documentId) {
@@ -282,11 +376,14 @@ export function useDocumentWebSocket(
       setConnectionState("closed");
     }
 
+    const typingTimeouts = typingTimeoutsRef.current;
     return () => {
       shouldReconnectRef.current = false;
       clearReconnectTimeout();
       closeSocket();
       setConnectionState("closed");
+      typingTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      typingTimeouts.clear();
     };
   }, [clearReconnectTimeout, closeSocket, connect, documentId, token]);
 
@@ -295,12 +392,24 @@ export function useDocumentWebSocket(
       content,
       version,
       presence,
+      typingUserIds,
       connectionState,
       isConnected: connectionState === "open",
       lastError,
       reconnect,
       sendMessage,
+      sendTyping,
     }),
-    [connectionState, content, lastError, presence, reconnect, sendMessage, version]
+    [
+      connectionState,
+      content,
+      lastError,
+      presence,
+      reconnect,
+      sendMessage,
+      sendTyping,
+      typingUserIds,
+      version,
+    ]
   );
 }

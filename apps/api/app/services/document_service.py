@@ -57,22 +57,40 @@ def update_document(
     user: User,
     new_content: str,
     base_version: int,
+    create_version_entry: bool = True,
+    bump_version: bool = True,
 ) -> Document:
+    """
+    Apply an OCC-checked content update to *document*.
+
+    Flags
+    -----
+    ``create_version_entry`` (default True)
+        Write a row to the versions table. WS live-sync sets this False so
+        every keystroke doesn't produce a restorable snapshot.
+    ``bump_version`` (default True)
+        Increment ``document.version``. WS live-sync also sets this False so
+        the version counter only advances on real milestones (REST autosave,
+        AI accept, restore). OCC is still checked — clients that fall out of
+        sync against a milestone version still get a 409.
+    """
     if base_version != document.version:
         raise StaleVersionError(
             latest_version=document.version,
             latest_content=document.current_content,
         )
 
-    document.version += 1
+    if bump_version:
+        document.version += 1
     document.current_content = new_content
-    version_service.create_version(
-        db,
-        document=document,
-        content=new_content,
-        created_by=user.id,
-        version_type=VersionType.manual_save,
-    )
+    if create_version_entry:
+        version_service.create_version(
+            db,
+            document=document,
+            content=new_content,
+            created_by=user.id,
+            version_type=VersionType.manual_save,
+        )
     db.commit()
     db.refresh(document)
     return document

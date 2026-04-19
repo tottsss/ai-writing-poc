@@ -5,12 +5,14 @@ Protocol
 --------
 Client → Server
   {"type": "document_update", "content": "<html>", "version": N}
+  {"type": "typing", "is_typing": true|false}
 
 Server → Client  (on connect, or after every accepted update)
   {"type": "document_updated", "payload": {"content": "<html>", "version": N}}
 
 Server → All clients in the room
   {"type": "presence_update", "payload": {"users": [{"userId": "...", "name": "..."}]}}
+  {"type": "typing_update",   "payload": {"user_id": "...", "name": "...", "is_typing": bool}}
 
 Conflict resolution (Optimistic Concurrency Control)
 ----------------------------------------------------
@@ -146,6 +148,9 @@ async def document_ws(
                     continue
 
                 # --- Accept: persist and broadcast ---
+                # WS updates are live sync; they don't create restorable
+                # versions or bump the version counter. Milestone snapshots
+                # come from REST autosave, AI accept, and restore.
                 try:
                     document = document_service.update_document(
                         db,
@@ -153,6 +158,8 @@ async def document_ws(
                         user=user,
                         new_content=incoming_content,
                         base_version=incoming_version,
+                        create_version_entry=False,
+                        bump_version=False,
                     )
                 except document_service.StaleVersionError:
                     # Race between two concurrent acceptances — resync
@@ -178,6 +185,23 @@ async def document_ws(
                             "version": document.version,
                         },
                     },
+                )
+
+            elif msg_type == "typing":
+                # Ephemeral activity signal — no DB write. Tell the other
+                # participants this user's typing state.
+                is_typing = bool(msg.get("is_typing", False))
+                await manager.broadcast(
+                    document_id,
+                    {
+                        "type": "typing_update",
+                        "payload": {
+                            "user_id": str(user.id),
+                            "name": user.name,
+                            "is_typing": is_typing,
+                        },
+                    },
+                    exclude=websocket,
                 )
 
     except WebSocketDisconnect:

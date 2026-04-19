@@ -8,6 +8,7 @@ import {
 export interface PresenceIndicatorProps {
   documentId?: string;
   users?: PresenceUser[];
+  typingUserIds?: string[];
   connectionState?: DocumentWebSocketConnectionState;
   lastError?: string | null;
   onReconnect?: () => void;
@@ -70,6 +71,7 @@ function getBadgeColor(userId: string): string {
 function PresenceIndicator({
   documentId,
   users,
+  typingUserIds,
   connectionState,
   lastError,
   onReconnect,
@@ -77,6 +79,7 @@ function PresenceIndicator({
   const socketState = useDocumentWebSocket(documentId ?? "");
 
   const resolvedUsers = users ?? socketState.presence;
+  const resolvedTyping = typingUserIds ?? socketState.typingUserIds;
   const resolvedConnectionState = connectionState ?? socketState.connectionState;
   const resolvedError = lastError ?? socketState.lastError;
   const handleReconnect = onReconnect ?? socketState.reconnect;
@@ -117,6 +120,7 @@ function PresenceIndicator({
             const displayName = getUserDisplayName(user);
             const badgeColor = getBadgeColor(user.userId);
 
+            const isTyping = resolvedTyping.includes(user.userId);
             return (
               <li key={user.userId} className="presence-user-item">
                 <span
@@ -126,7 +130,14 @@ function PresenceIndicator({
                 >
                   {getInitials(displayName)}
                 </span>
-                <span className="presence-user-name">{displayName}</span>
+                <span className="presence-user-name">
+                  {displayName}
+                  {isTyping ? (
+                    <span className="presence-typing-indicator">
+                      {" "}typing...
+                    </span>
+                  ) : null}
+                </span>
               </li>
             );
           })}
