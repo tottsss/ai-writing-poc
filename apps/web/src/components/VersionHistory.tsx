@@ -22,6 +22,7 @@ interface RawVersionRecord {
 
 export interface VersionHistoryProps {
   documentId: string;
+  canRestore?: boolean;
   onRestoreSuccess?: (restoredVersion: number) => void;
 }
 
@@ -139,7 +140,11 @@ function getTimestampValue(timestamp: string): number {
   return Number.isNaN(dateValue) ? 0 : dateValue;
 }
 
-function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
+function VersionHistory({
+  documentId,
+  canRestore = true,
+  onRestoreSuccess,
+}: VersionHistoryProps) {
   const auth = useAuth();
   const { logout } = auth;
   const [versions, setVersions] = useState<VersionRecord[]>([]);
@@ -294,13 +299,17 @@ function VersionHistory({ documentId, onRestoreSuccess }: VersionHistoryProps) {
                   {formatTimestamp(record.timestamp)} • {record.author}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleRestore(record)}
-                disabled={restoringVersion === record.version}
-              >
-                {restoringVersion === record.version ? "Restoring..." : "Restore"}
-              </button>
+              {canRestore ? (
+                <button
+                  type="button"
+                  onClick={() => void handleRestore(record)}
+                  disabled={restoringVersion === record.version}
+                >
+                  {restoringVersion === record.version
+                    ? "Restoring..."
+                    : "Restore"}
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>

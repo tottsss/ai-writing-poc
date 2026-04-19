@@ -153,6 +153,7 @@ function Editor() {
         <aside className="space-y-4">
           <VersionHistory
             documentId={documentId}
+            canRestore={document?.role !== "viewer"}
             onRestoreSuccess={() => {
               void loadDocument();
             }}
